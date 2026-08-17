@@ -3,4 +3,4 @@
 // actually picked up your latest changes — Supabase can sometimes serve a
 // cached/previous version if a deploy silently failed or targeted the
 // wrong project ref.
-export const API_VERSION = "1.3.0-no-policy-param";
+export const API_VERSION = "1.8.1-routeros6-chunk-newline-fix";

@@ -32,14 +32,8 @@ api.interceptors.request.use(async (config) => {
 api.interceptors.response.use(
   (res) => res,
   (error) => {
-    const status = error?.response?.status;
     const message = error?.response?.data?.error?.message ?? error.message ?? "حدث خطأ غير متوقع";
-    const code = error?.response?.data?.error?.code ?? "ERROR";
-    const enhancedError = new Error(message) as any;
-    enhancedError.status = status;
-    enhancedError.code = code;
-    enhancedError.original = error;
-    return Promise.reject(enhancedError);
+    return Promise.reject(new Error(message));
   }
 );
 
@@ -76,8 +70,13 @@ export const exportApi = {
     scriptContent?: string;
     libraryFileId?: string;
   }) =>
+    // A generated user batch can legitimately take longer than the API's
+    // normal 30-second timeout. Keep the request open while the router runs
+    // the temporary script and the backend removes it afterward.
     api
-      .post<{ data: { success: boolean; log: string[] } }>("/export-to-mikrotik", input)
+      .post<{ data: { success: boolean; log: string[] } }>("/export-to-mikrotik", input, {
+        timeout: 180_000,
+      })
       .then((r) => r.data.data),
 };
 
@@ -89,7 +88,9 @@ export const libraryApi = {
     form.append("file", file, String(meta.name));
     Object.entries(meta).forEach(([k, v]) => form.append(k, String(v)));
     return api
-      .post<{ data: LibraryFile }>("/library", form)
+      .post<{ data: LibraryFile }>("/library", form, {
+        headers: { "Content-Type": "multipart/form-data" },
+      })
       .then((r) => r.data.data);
   },
   /**

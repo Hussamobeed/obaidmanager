@@ -77,8 +77,10 @@ export function RoutersPage() {
     const toastId = toast.loading(`جارٍ مزامنة ${router.name}...`);
     try {
       const result = await syncApi.run(router.id);
+      setSelectedRouterId(router.id);
+      await qc.invalidateQueries({ queryKey: ["sync-cache", router.id] });
       toast.success(
-        `تمت المزامنة: ${result.usersCount} مستخدم، ${result.activeSessionsCount} جلسة نشطة`,
+        `تم استيراد ${result.customers.length} عميل و${result.profiles.length} بروفايل`,
         { id: toastId }
       );
     } catch (err) {

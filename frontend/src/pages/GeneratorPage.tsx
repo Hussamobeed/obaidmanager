@@ -82,64 +82,56 @@ export function GeneratorPage() {
     if (availableProfiles.length) setProfileMode("select");
   }, [availableProfiles.length]);
 
+  function fileNameFor(usedNumbers = numbers.length) {
+    return buildFileName({
+      profile: settings.profile,
+      suffix: settings.beginNumber,
+      usedNumbers,
+    });
+  }
+
+  async function saveGeneratedArtifacts(generatedNumbers: string[], generatedScript: string) {
+    const name = fileNameFor(generatedNumbers.length);
+    const pdf = await generateCardsPdf(generatedNumbers, layout, printOptions);
+    const commonMeta = {
+      customer: settings.customer,
+      profile: settings.profile,
+      prefix: settings.beginNumber,
+      numberCount: generatedNumbers.length,
+    };
+
+    await Promise.all([
+      libraryApi.upload(pdf, { ...commonMeta, name: `${name}.pdf`, fileType: "pdf" }),
+      libraryApi.upload(new Blob([generatedScript], { type: "text/plain;charset=utf-8" }), {
+        ...commonMeta,
+        name: `${name}.rsc`,
+        fileType: "mikrotik-script",
+      }),
+    ]);
+  }
+
   async function handleGenerate() {
     try {
       const result = generateCards(settings);
       setResult(result.numbers, result.script);
       setLastCustomer(settings.customer);
       setLastProfile(settings.profile);
-      toast.success(`تم توليد ${result.numbers.length} رقم بنجاح`);
 
-      // Auto-save to library (script + PDF) — works on mobile & PC
-      await autoSaveToLibrary(result.numbers, result.script);
+      const toastId = toast.loading("جارٍ حفظ PDF وسكربت MikroTik في المكتبة...");
+      try {
+        await saveGeneratedArtifacts(result.numbers, result.script);
+        toast.success(`تم توليد ${result.numbers.length} رقم وحفظ PDF والسكريبت في المكتبة`, { id: toastId });
+      } catch (saveError) {
+        toast.error(`تم التوليد، لكن تعذّر الحفظ التلقائي: ${(saveError as Error).message}`, { id: toastId });
+      }
     } catch (err) {
       toast.error((err as Error).message);
     }
   }
 
-  async function autoSaveToLibrary(numbers: string[], script: string) {
-    const name = fileNameFor("auto");
-    try {
-      // 1. Save script
-      await libraryApi.upload(new Blob([script], { type: "text/plain" }), {
-        name: `${name}.rsc`,
-        fileType: "mikrotik-script",
-        customer: settings.customer,
-        profile: settings.profile,
-        prefix: settings.beginNumber,
-        numberCount: numbers.length,
-      });
-
-      // 2. Save PDF
-      const pdfBlob = await generateCardsPdf(numbers, layout, printOptions);
-      await libraryApi.upload(pdfBlob, {
-        name: `${name}.pdf`,
-        fileType: "pdf",
-        customer: settings.customer,
-        profile: settings.profile,
-        prefix: settings.beginNumber,
-        numberCount: numbers.length,
-      });
-
-      toast.success("تم الحفظ التلقائي في المكتبة (سكريبت + PDF)");
-    } catch (err) {
-      // Auto-save failure should not block the user — just warn silently
-      console.error("Auto-save failed:", err);
-    }
-  }
-
-  function fileNameFor(type: string) {
-    return buildFileName({
-      fileType: type,
-      profile: settings.profile,
-      prefix: settings.beginNumber,
-      count: numbers.length,
-    });
-  }
-
   async function handleSaveTxt() {
     if (!numbers.length) return toast.error("قم بتوليد الأرقام أولًا");
-    const name = fileNameFor("txt");
+    const name = fileNameFor();
     downloadTextFile(numbers.join("\n"), `${name}.txt`);
     await libraryApi.upload(new Blob([numbers.join("\n")], { type: "text/plain" }), {
       name: `${name}.txt`,
@@ -154,7 +146,7 @@ export function GeneratorPage() {
 
   async function handleSaveScript() {
     if (!script) return toast.error("قم بتوليد السكريبت أولًا");
-    const name = fileNameFor("mikrotik");
+    const name = fileNameFor();
     downloadTextFile(script, `${name}.rsc`);
     await libraryApi.upload(new Blob([script], { type: "text/plain" }), {
       name: `${name}.rsc`,
@@ -169,7 +161,7 @@ export function GeneratorPage() {
 
   async function handleSaveExcel() {
     if (!numbers.length) return toast.error("قم بتوليد الأرقام أولًا");
-    const name = fileNameFor("excel");
+    const name = fileNameFor();
     exportAsExcel(numbers, settings, name);
     const blob = exportAsExcelBlob(numbers, settings);
     await libraryApi.upload(blob, {
@@ -185,7 +177,7 @@ export function GeneratorPage() {
 
   async function handleGeneratePdf() {
     if (!numbers.length) return toast.error("قم بتوليد الأرقام أولًا");
-    const name = fileNameFor("pdf");
+    const name = fileNameFor();
     const blob = await generateCardsPdf(numbers, layout, printOptions);
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -211,7 +203,7 @@ export function GeneratorPage() {
     setExportLog([]);
     const toastId = toast.loading("جارٍ رفع السكريبت وتنفيذه على الراوتر...");
     try {
-      const name = `${fileNameFor("mikrotik")}.rsc`;
+      const name = `${fileNameFor()}.rsc`;
       const result = await exportApi.run({
         routerId: selectedRouterId,
         fileName: name,

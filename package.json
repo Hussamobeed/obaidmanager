@@ -1,0 +1,10 @@
+{
+  "name": "manuscards-maker",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.15.1",
+  "scripts": {
+    "build": "pnpm --filter @manuscards/web build && pnpm --filter @manuscards/android-worker build",
+    "check": "pnpm --filter @manuscards/web check && pnpm --filter @manuscards/android-worker check"
+  }
+}

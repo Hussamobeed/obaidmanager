@@ -4,7 +4,8 @@ import { LIBRARY_BUCKET, supabase } from "./db.ts";
 import { encrypt } from "./cryptoService.ts";
 import {
   exportScriptToRouter,
-  synchronizeRouter,
+  fetchUserManagerReport,
+  synchronizeProfilesAndCustomers,
   testConnection,
   type RouterRow,
 } from "./mikrotikService.ts";
@@ -21,11 +22,8 @@ const corsHeaders = {
 
 app.use("*", async (c, next) => {
   if (c.req.method === "OPTIONS") return c.text("ok", 200, corsHeaders);
-  try {
-    await next();
-  } finally {
-    Object.entries(corsHeaders).forEach(([k, v]) => c.res.headers.set(k, v));
-  }
+  await next();
+  Object.entries(corsHeaders).forEach(([k, v]) => c.res.headers.set(k, v));
 });
 
 function fail(c: any, status: number, message: string, code = "ERROR") {
@@ -90,7 +88,7 @@ app.get("/routers", async (c) => {
   const { data, error } = await supabase
     .from("routers")
     .select("*")
-    .eq("user_id", userId)
+    .eq("owner_id", userId)
     .order("created_at", { ascending: false });
   if (error) return fail(c, 500, error.message);
   return c.json({ data: (data ?? []).map(toPublicRouter) });
@@ -103,17 +101,13 @@ app.post("/routers", async (c) => {
   const input = parsed.data;
 
   if (input.isDefault) {
-    const { error: resetErr } = await supabase
-      .from("routers")
-      .update({ is_default: false })
-      .eq("user_id", userId);
-    if (resetErr) return fail(c, 500, resetErr.message, "DB_ERROR");
+    await supabase.from("routers").update({ is_default: false }).eq("owner_id", userId);
   }
 
   const { data, error } = await supabase
     .from("routers")
     .insert({
-      user_id: userId,
+      owner_id: userId,
       name: input.name,
       host: input.host,
       port: input.port,
@@ -138,11 +132,7 @@ app.put("/routers/:id", async (c) => {
   const input = parsed.data;
 
   if (input.isDefault) {
-    const { error: resetErr } = await supabase
-      .from("routers")
-      .update({ is_default: false })
-      .eq("user_id", userId);
-    if (resetErr) return fail(c, 500, resetErr.message, "DB_ERROR");
+    await supabase.from("routers").update({ is_default: false }).eq("owner_id", userId);
   }
 
   const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
@@ -159,7 +149,7 @@ app.put("/routers/:id", async (c) => {
     .from("routers")
     .update(update)
     .eq("id", id)
-    .eq("user_id", userId)
+    .eq("owner_id", userId)
     .select()
     .single();
   if (error) return fail(c, 500, error.message);
@@ -168,13 +158,13 @@ app.put("/routers/:id", async (c) => {
 
 app.delete("/routers/:id", async (c) => {
   const userId = c.get("userId");
-  const { error } = await supabase.from("routers").delete().eq("id", c.req.param("id")).eq("user_id", userId);
+  const { error } = await supabase.from("routers").delete().eq("id", c.req.param("id")).eq("owner_id", userId);
   if (error) return fail(c, 500, error.message);
   return c.body(null, 204);
 });
 
 async function getRouterRow(id: string, userId: string): Promise<RouterRow | null> {
-  const { data } = await supabase.from("routers").select("*").eq("id", id).eq("user_id", userId).single();
+  const { data } = await supabase.from("routers").select("*").eq("id", id).eq("owner_id", userId).single();
   return (data as RouterRow) ?? null;
 }
 
@@ -190,89 +180,120 @@ app.post("/routers/:id/test-connection", async (c) => {
 });
 
 // ----------------------------------------------------------------- sync --
+// A manual sync is a one-time import. It writes the User Manager profiles to
+// report_profiles, then marks that run as the router's active snapshot. The
+// card generator reads this active snapshot through the cache endpoint below.
 app.post("/sync/:routerId", async (c) => {
   const userId = c.get("userId");
   const routerId = c.req.param("routerId");
   const router = await getRouterRow(routerId, userId);
   if (!router) return fail(c, 404, "الراوتر غير موجود", "ROUTER_NOT_FOUND");
 
-  const startedAt = new Date().toISOString();
-  const { data: historyRow } = await supabase
-    .from("sync_history")
-    .insert({ user_id: userId, router_id: routerId, status: "running", started_at: startedAt })
-    .select()
+  const { data: syncRun, error: runError } = await supabase
+    .from("sync_runs")
+    .insert({
+      owner_id: userId,
+      router_id: routerId,
+      mode: "bootstrap",
+      status: "running",
+      started_at: new Date().toISOString(),
+    })
+    .select("id")
     .single();
+  if (runError || !syncRun) return fail(c, 500, runError?.message ?? "تعذّر بدء المزامنة");
 
   try {
-    const result = await synchronizeRouter(router);
-
-    await supabase.from("sync_cache").upsert({
+    const result = await synchronizeProfilesAndCustomers(router);
+    const profiles = result.profiles.map((profile) => ({
       router_id: routerId,
-      user_id: userId,
-      identity: result.identity,
-      routeros_version: result.routerosVersion,
-      uptime: result.uptime,
-      cpu_load: result.cpuLoad,
-      free_memory: result.freeMemory,
-      total_memory: result.totalMemory,
-      customers: result.customers,
-      profiles: result.profiles,
-      users_count: result.usersCount,
-      active_sessions_count: result.activeSessionsCount,
-      expired_users_count: result.expiredUsersCount,
-      disabled_users_count: result.disabledUsersCount,
-      last_synced_at: result.syncedAt,
-      last_sync_status: "success",
-      last_sync_error: null,
-    });
+      run_id: syncRun.id,
+      name: profile.name,
+      price: Number(profile.priceUnit) || 0,
+      validity: profile.validity ?? "",
+    }));
 
-    if (historyRow) {
-      await supabase
-        .from("sync_history")
-        .update({
-          status: "success",
-          message: `تمت المزامنة بنجاح (${result.usersCount} مستخدم)`,
-          finished_at: new Date().toISOString(),
-        })
-        .eq("id", historyRow.id);
+    if (profiles.length) {
+      const { error: profilesError } = await supabase.from("report_profiles").insert(profiles);
+      if (profilesError) throw profilesError;
     }
 
-    return c.json({ data: { routerId, ...result } });
+    const { error: snapshotError } = await supabase.from("report_snapshots").upsert({
+      router_id: routerId,
+      owner_id: userId,
+      active_run_id: syncRun.id,
+      customers: result.customers,
+      updated_at: result.syncedAt,
+    });
+    if (snapshotError) throw snapshotError;
+
+    const { error: completeError } = await supabase
+      .from("sync_runs")
+      .update({
+        status: "success",
+        users_count: 0,
+        profiles_count: profiles.length,
+        session_rows_count: 0,
+        message: `تم استيراد ${result.customers.length} عميل و${profiles.length} بروفايل بنجاح`,
+        finished_at: new Date().toISOString(),
+      })
+      .eq("id", syncRun.id)
+      .eq("owner_id", userId);
+    if (completeError) throw completeError;
+
+    return c.json({
+      data: {
+        routerId,
+        customers: result.customers,
+        profiles: result.profiles,
+        syncedAt: result.syncedAt,
+      },
+    });
   } catch (err) {
     const message = (err as Error).message;
-    if (historyRow) {
-      await supabase
-        .from("sync_history")
-        .update({ status: "error", message, finished_at: new Date().toISOString() })
-        .eq("id", historyRow.id);
-    }
-    await supabase.from("sync_cache").upsert({
-      router_id: routerId,
-      user_id: userId,
-      last_sync_status: "error",
-      last_sync_error: message,
-      last_synced_at: new Date().toISOString(),
-    });
+    await supabase
+      .from("sync_runs")
+      .update({ status: "error", message, finished_at: new Date().toISOString() })
+      .eq("id", syncRun.id)
+      .eq("owner_id", userId);
     return fail(c, 502, message, "SYNC_FAILED");
   }
 });
 
 app.get("/sync/:routerId/cache", async (c) => {
-  const { data } = await supabase
-    .from("sync_cache")
-    .select("*")
-    .eq("router_id", c.req.param("routerId"))
-    .eq("user_id", c.get("userId"))
+  const userId = c.get("userId");
+  const routerId = c.req.param("routerId");
+  const { data: snapshot, error: snapshotError } = await supabase
+    .from("report_snapshots")
+    .select("active_run_id,updated_at,customers")
+    .eq("router_id", routerId)
+    .eq("owner_id", userId)
     .maybeSingle();
-  return c.json({ data: data ?? null });
+  if (snapshotError) return fail(c, 500, snapshotError.message);
+  if (!snapshot?.active_run_id) return c.json({ data: null });
+
+  const { data: profiles, error: profilesError } = await supabase
+    .from("report_profiles")
+    .select("name,price,validity")
+    .eq("router_id", routerId)
+    .eq("run_id", snapshot.active_run_id)
+    .order("name", { ascending: true });
+  if (profilesError) return fail(c, 500, profilesError.message);
+
+  return c.json({
+    data: {
+      customers: snapshot.customers ?? [],
+      profiles: profiles ?? [],
+      last_synced_at: snapshot.updated_at,
+    },
+  });
 });
 
 app.get("/sync/:routerId/history", async (c) => {
   const { data } = await supabase
-    .from("sync_history")
+    .from("sync_runs")
     .select("*")
     .eq("router_id", c.req.param("routerId"))
-    .eq("user_id", c.get("userId"))
+    .eq("owner_id", c.get("userId"))
     .order("started_at", { ascending: false })
     .limit(50);
   return c.json({ data: data ?? [] });
@@ -280,9 +301,9 @@ app.get("/sync/:routerId/history", async (c) => {
 
 app.get("/sync/history/all", async (c) => {
   const { data } = await supabase
-    .from("sync_history")
+    .from("sync_runs")
     .select("*")
-    .eq("user_id", c.get("userId"))
+    .eq("owner_id", c.get("userId"))
     .order("started_at", { ascending: false })
     .limit(50);
   return c.json({ data: data ?? [] });
@@ -353,6 +374,20 @@ app.get("/export-to-mikrotik/history", async (c) => {
   return c.json({ data: data ?? [] });
 });
 
+// ------------------------------------------------------------- reports --
+// User Manager session report — fetched from the router live, on demand
+// only (button press), never cached or auto-refreshed.
+app.get("/reports/:routerId", async (c) => {
+  const router = await getRouterRow(c.req.param("routerId"), c.get("userId"));
+  if (!router) return fail(c, 404, "الراوتر غير موجود", "ROUTER_NOT_FOUND");
+  try {
+    const result = await fetchUserManagerReport(router);
+    return c.json({ data: result });
+  } catch (err) {
+    return fail(c, 502, (err as Error).message, "REPORT_FETCH_FAILED");
+  }
+});
+
 // ------------------------------------------------------------- library --
 app.get("/library", async (c) => {
   const { data, error } = await supabase
@@ -386,6 +421,7 @@ app.post("/library", async (c) => {
   const { data, error } = await supabase
     .from("library_files")
     .insert({
+      owner_id: userId,
       user_id: userId,
       name,
       file_type: fileType,
@@ -452,6 +488,7 @@ app.post("/library/:id/duplicate", async (c) => {
   const { data, error } = await supabase
     .from("library_files")
     .insert({
+      owner_id: userId,
       user_id: userId,
       name: `نسخة من ${fileRow.name}`,
       file_type: fileRow.file_type,
@@ -517,26 +554,9 @@ app.post("/settings/import/json", async (c) => {
     .parse(await c.req.json());
 
   for (const [key, value] of Object.entries(body.settings)) {
-    const { error } = await supabase
-      .from("app_settings")
-      .upsert({ user_id: userId, key, value, updated_at: new Date().toISOString() });
-    if (error) return fail(c, 500, error.message, "DB_ERROR");
+    await supabase.from("app_settings").upsert({ user_id: userId, key, value, updated_at: new Date().toISOString() });
   }
-
-  for (const preset of body.presets) {
-    const { error } = await supabase
-      .from("presets")
-      .insert({ user_id: userId, name: preset.name, settings: preset.settings_json });
-    if (error) return fail(c, 500, error.message, "DB_ERROR");
-  }
-
-  return c.json({
-    data: {
-      imported: true,
-      settingsCount: Object.keys(body.settings).length,
-      presetsCount: body.presets.length,
-    },
-  });
+  return c.json({ data: { imported: true } });
 });
 
 app.get("/settings/presets/all", async (c) => {

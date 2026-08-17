@@ -90,32 +90,15 @@ export interface RouterInput {
 
 export interface SyncResult {
   routerId: string;
-  identity: string;
-  routerosVersion: string;
-  uptime: string;
-  cpuLoad: string;
-  freeMemory: string;
-  totalMemory: string;
   customers: { name: string; numUsers?: string }[];
   profiles: { name: string; priceUnit?: string; validity?: string }[];
-  usersCount: number;
-  activeSessionsCount: number;
-  expiredUsersCount: number;
-  disabledUsersCount: number;
   syncedAt: string;
 }
 
 export interface CachedSyncData {
-  router_id: string;
-  identity: string | null;
-  routeros_version: string | null;
   customers: { name: string; numUsers?: string }[];
-  profiles: { name: string; priceUnit?: string; validity?: string }[];
-  users_count: number | null;
-  active_sessions_count: number | null;
+  profiles: { name: string; price?: number; validity?: string }[];
   last_synced_at: string | null;
-  last_sync_status: string | null;
-  last_sync_error: string | null;
 }
 
 export interface PrintTemplate {

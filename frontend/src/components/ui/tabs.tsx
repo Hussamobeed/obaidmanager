@@ -5,14 +5,23 @@ const TabsContext = createContext<{ value: string; setValue: (v: string) => void
 
 export function Tabs({
   defaultValue,
+  value: controlledValue,
+  onValueChange,
   children,
   className,
 }: {
-  defaultValue: string;
+  defaultValue?: string;
+  value?: string;
+  onValueChange?: (value: string) => void;
   children: ReactNode;
   className?: string;
 }) {
-  const [value, setValue] = useState(defaultValue);
+  const [uncontrolledValue, setUncontrolledValue] = useState(defaultValue ?? "");
+  const value = controlledValue ?? uncontrolledValue;
+  const setValue = (nextValue: string) => {
+    setUncontrolledValue(nextValue);
+    onValueChange?.(nextValue);
+  };
   return (
     <TabsContext.Provider value={{ value, setValue }}>
       <div className={className}>{children}</div>

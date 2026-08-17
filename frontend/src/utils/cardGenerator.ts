@@ -24,12 +24,7 @@ export function generateCards(settings: GeneratorSettings): GenerationResult {
   const seen = new Set<string>();
   let script = "";
 
-  // rosEsc  = escape quotes for use INSIDE already-quoted strings (log messages)
-  // rosQuote = wrap value in quotes for use as command arguments
-  const rosEsc = (s: string) => s.replace(/"/g, '\\"');
-  const rosQuote = (s: string) => `"${s.replace(/"/g, '\\"')}"`;
-
-  script += `/log info "بدء إنشاء المستخدمين للعميل ${rosEsc(customer)}";\n`;
+  script += `/log info "بدء إنشاء المستخدمين للعميل ${customer}";\n`;
   script += `:local scriptRunDate [/system clock get date];\n`;
 
   // Safety cap to avoid an infinite loop if length/count combination can't produce
@@ -48,13 +43,12 @@ export function generateCards(settings: GeneratorSettings): GenerationResult {
     seen.add(candidate);
     numbers.push(candidate);
 
-    // password: "same" → quoted candidate, "empty" → RouterOS empty string syntax ""
-    const password = passwordType === "same" ? rosQuote(candidate) : '""';
+    const password = passwordType === "same" ? candidate : '""';
 
     script +=
-      `/log info "إنشاء مستخدم جديد: ${rosEsc(candidate)}";\n` +
-      `/tool user-manager user add customer=${rosQuote(customer)} username=${rosQuote(candidate)} password=${password} first-name=$scriptRunDate comment=${rosQuote(comment)};\n` +
-      `/tool user-manager user create-and-activate-profile customer=${rosQuote(customer)} profile=${rosQuote(profile)} ${rosQuote(candidate)};\n`;
+      `/log info "إنشاء مستخدم جديد: ${candidate}";\n` +
+      `/tool user-manager user add customer=${customer} username=${candidate} password=${password} first-name=$scriptRunDate comment=${comment};\n` +
+      `/tool user-manager user create-and-activate-profile customer=${customer} profile=${profile} "${candidate}";\n`;
   }
 
   if (numbers.length < count) {
@@ -63,19 +57,23 @@ export function generateCards(settings: GeneratorSettings): GenerationResult {
     );
   }
 
-  script += `/log info "اكتمال إنشاء المستخدمين للعميل ${rosEsc(customer)} - العدد الإجمالي: ${count}";\n`;
+  script += `/log info "اكتمال إنشاء المستخدمين للعميل ${customer} - العدد الإجمالي: ${count}";\n`;
 
   return { numbers, script };
 }
 
 export function buildFileName(params: {
-  fileType: string;
   profile: string;
-  prefix: string;
-  count: number;
+  suffix: string;
+  usedNumbers: number;
+  date?: Date;
 }): string {
-  const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-  const safeProfile = params.profile || "profile";
-  const safePrefix = params.prefix || "0";
-  return `${params.fileType}_${safeProfile}_${safePrefix}_${params.count}_${date}`;
+  // Use the same readable title for the PDF and MikroTik script. The extension
+  // identifies the artifact type, so the library stays grouped by one card run.
+  const date = (params.date ?? new Date()).toISOString().slice(0, 10);
+  const safePart = (value: string, fallback: string) =>
+    (value.trim() || fallback).replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, "-");
+  const profile = safePart(params.profile, "profile");
+  const suffix = safePart(params.suffix, "0");
+  return `${profile}_${suffix}_${params.usedNumbers}_${date}`;
 }

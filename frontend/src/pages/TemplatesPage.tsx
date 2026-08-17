@@ -11,9 +11,59 @@ import { defaultLayout } from "@/stores/generatorStore";
 import { useAppStore } from "@/stores/appStore";
 import { PdfLayoutSettings, PrintTemplate } from "@/types";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Move, Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Plus, Trash2 } from "lucide-react";
 import { ChangeEvent, useState } from "react";
 import toast from "react-hot-toast";
+
+type PositionTarget = "number" | "serial" | "date" | "customText";
+type TemplateTab = PositionTarget | "page";
+
+const positionTargetLabels: Record<PositionTarget, string> = {
+  number: "رقم الكرت / اسم المستخدم",
+  serial: "الرقم التسلسلي",
+  date: "التاريخ",
+  customText: "النص الاختياري",
+};
+
+function PositionPad({
+  label,
+  x,
+  y,
+  onMove,
+}: {
+  label: string;
+  x: number;
+  y: number;
+  onMove: (deltaX: number, deltaY: number) => void;
+}) {
+  return (
+    <div className="rounded-lg border border-border bg-secondary/40 p-3">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <p className="text-sm font-medium">تحريك: {label}</p>
+        <p className="text-xs text-muted-foreground" dir="ltr">
+          X: {x} · Y: {y}
+        </p>
+      </div>
+      <div className="mx-auto grid w-40 grid-cols-3 gap-1.5" dir="ltr">
+        <span />
+        <Button type="button" variant="outline" size="icon" className="h-11 w-11" onClick={() => onMove(0, -1)} title="أعلى">
+          <ArrowUp className="h-5 w-5" />
+        </Button>
+        <span />
+        <Button type="button" variant="outline" size="icon" className="h-11 w-11" onClick={() => onMove(-1, 0)} title="يسار">
+          <ArrowLeft className="h-5 w-5" />
+        </Button>
+        <Button type="button" variant="outline" size="icon" className="h-11 w-11" onClick={() => onMove(0, 1)} title="أسفل">
+          <ArrowDown className="h-5 w-5" />
+        </Button>
+        <Button type="button" variant="outline" size="icon" className="h-11 w-11" onClick={() => onMove(1, 0)} title="يمين">
+          <ArrowRight className="h-5 w-5" />
+        </Button>
+      </div>
+      <p className="mt-2 text-center text-xs text-muted-foreground">كل ضغطة تحرّك العنصر 1px؛ يمكنك الاستمرار بالضغط للتحريك المتدرّج.</p>
+    </div>
+  );
+}
 
 export function TemplatesPage() {
   const qc = useQueryClient();
@@ -22,7 +72,8 @@ export function TemplatesPage() {
   const [name, setName] = useState("");
   const [profile, setProfile] = useState("");
   const [layout, setLocalLayout] = useState<PdfLayoutSettings>(defaultLayout);
-  const [activePosElement, setActivePosElement] = useState<"text" | "serial" | "date" | "customText">("text");
+  const [activeTab, setActiveTab] = useState<TemplateTab>("number");
+  const [positionTarget, setPositionTarget] = useState<PositionTarget>("number");
 
   const { data: templates = [] } = useQuery<PrintTemplate[]>({
     queryKey: ["templates"],
@@ -38,6 +89,22 @@ export function TemplatesPage() {
 
   function patchLayout(partial: Partial<PdfLayoutSettings>) {
     setLocalLayout((l) => ({ ...l, ...partial }));
+  }
+
+  const position = {
+    number: { x: layout.textPositionX, y: layout.textPositionY },
+    serial: { x: layout.serialPositionX, y: layout.serialPositionY },
+    date: { x: layout.datePositionX, y: layout.datePositionY },
+    customText: { x: layout.customTextPositionX, y: layout.customTextPositionY },
+  }[positionTarget];
+
+  function nudgePosition(deltaX: number, deltaY: number) {
+    const x = Math.max(0, position.x + deltaX);
+    const y = Math.max(0, position.y + deltaY);
+    if (positionTarget === "number") patchLayout({ textPositionX: x, textPositionY: y });
+    if (positionTarget === "serial") patchLayout({ serialPositionX: x, serialPositionY: y });
+    if (positionTarget === "date") patchLayout({ datePositionX: x, datePositionY: y });
+    if (positionTarget === "customText") patchLayout({ customTextPositionX: x, customTextPositionY: y });
   }
 
   function handleBackgroundUpload(e: ChangeEvent<HTMLInputElement>) {
@@ -124,7 +191,14 @@ export function TemplatesPage() {
               </p>
             </div>
 
-            <Tabs defaultValue="number">
+            <Tabs
+              value={activeTab}
+              onValueChange={(value) => {
+                const tab = value as TemplateTab;
+                setActiveTab(tab);
+                if (tab !== "page") setPositionTarget(tab);
+              }}
+            >
               <TabsList className="w-full flex-wrap">
                 <TabsTrigger value="number">رقم الكرت</TabsTrigger>
                 <TabsTrigger value="serial">الرقم التسلسلي</TabsTrigger>
@@ -166,8 +240,8 @@ export function TemplatesPage() {
                     <div>
                       <Label>الخط</Label>
                       <Select value={layout.font} onChange={(e) => patchLayout({ font: e.target.value })}>
-                        <option value="Cairo">Cairo (عربي)</option>
                         <option value="helvetica">Helvetica</option>
+                        <option value="cairo">Cairo (عربي)</option>
                         <option value="times">Times</option>
                         <option value="courier">Courier</option>
                       </Select>
@@ -434,209 +508,19 @@ export function TemplatesPage() {
       </div>
 
       <div className="space-y-5">
-        {/* Position Controls - Easy X/Y input for mobile & PC */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-sm">
-              <Move className="h-4 w-4" />
-              تحريك العناصر (X / Y)
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {/* Element selector */}
-            <div>
-              <Label className="text-xs">العنصر</Label>
-              <Select
-                value={activePosElement}
-                onChange={(e) => setActivePosElement(e.target.value as any)}
-              >
-                <option value="text">رقم الكرت (Username)</option>
-                <option value="serial">الرقم التسلسلي</option>
-                <option value="date">التاريخ</option>
-                <option value="customText">نص اختياري</option>
-              </Select>
-            </div>
-
-            {/* X / Y inputs with arrow nudge buttons */}
-            <div className="grid grid-cols-[1fr_auto_1fr_auto] gap-2 items-end">
-              <div>
-                <Label className="text-xs">X (أفقي)</Label>
-                <Input
-                  type="number"
-                  value={
-                    activePosElement === "text"
-                      ? layout.textPositionX
-                      : activePosElement === "serial"
-                        ? layout.serialPositionX
-                        : activePosElement === "date"
-                          ? layout.datePositionX
-                          : layout.customTextPositionX
-                  }
-                  onChange={(e) => {
-                    const v = Number(e.target.value);
-                    if (activePosElement === "text") patchLayout({ textPositionX: v });
-                    else if (activePosElement === "serial") patchLayout({ serialPositionX: v });
-                    else if (activePosElement === "date") patchLayout({ datePositionX: v });
-                    else patchLayout({ customTextPositionX: v });
-                  }}
-                />
-              </div>
-              <div className="flex flex-col gap-1">
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="h-7 w-7"
-                  onClick={() => {
-                    const key =
-                      activePosElement === "text"
-                        ? "textPositionY"
-                        : activePosElement === "serial"
-                          ? "serialPositionY"
-                          : activePosElement === "date"
-                            ? "datePositionY"
-                            : "customTextPositionY";
-                    patchLayout({ [key]: (layout as any)[key] - 1 });
-                  }}
-                >
-                  <ArrowUp className="h-3 w-3" />
-                </Button>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="h-7 w-7"
-                  onClick={() => {
-                    const key =
-                      activePosElement === "text"
-                        ? "textPositionY"
-                        : activePosElement === "serial"
-                          ? "serialPositionY"
-                          : activePosElement === "date"
-                            ? "datePositionY"
-                            : "customTextPositionY";
-                    patchLayout({ [key]: (layout as any)[key] + 1 });
-                  }}
-                >
-                  <ArrowDown className="h-3 w-3" />
-                </Button>
-              </div>
-              <div>
-                <Label className="text-xs">Y (رأسي)</Label>
-                <Input
-                  type="number"
-                  value={
-                    activePosElement === "text"
-                      ? layout.textPositionY
-                      : activePosElement === "serial"
-                        ? layout.serialPositionY
-                        : activePosElement === "date"
-                          ? layout.datePositionY
-                          : layout.customTextPositionY
-                  }
-                  onChange={(e) => {
-                    const v = Number(e.target.value);
-                    if (activePosElement === "text") patchLayout({ textPositionY: v });
-                    else if (activePosElement === "serial") patchLayout({ serialPositionY: v });
-                    else if (activePosElement === "date") patchLayout({ datePositionY: v });
-                    else patchLayout({ customTextPositionY: v });
-                  }}
-                />
-              </div>
-              <div className="flex flex-col gap-1">
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="h-7 w-7"
-                  onClick={() => {
-                    const key =
-                      activePosElement === "text"
-                        ? "textPositionX"
-                        : activePosElement === "serial"
-                          ? "serialPositionX"
-                          : activePosElement === "date"
-                            ? "datePositionX"
-                            : "customTextPositionX";
-                    patchLayout({ [key]: (layout as any)[key] - 1 });
-                  }}
-                >
-                  <ArrowLeft className="h-3 w-3" />
-                </Button>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="h-7 w-7"
-                  onClick={() => {
-                    const key =
-                      activePosElement === "text"
-                        ? "textPositionX"
-                        : activePosElement === "serial"
-                          ? "serialPositionX"
-                          : activePosElement === "date"
-                            ? "datePositionX"
-                            : "customTextPositionX";
-                    patchLayout({ [key]: (layout as any)[key] + 1 });
-                  }}
-                >
-                  <ArrowRight className="h-3 w-3" />
-                </Button>
-              </div>
-            </div>
-
-            {/* Size quick control */}
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <Label className="text-xs">الحجم</Label>
-                <Input
-                  type="number"
-                  value={
-                    activePosElement === "text"
-                      ? layout.textSize
-                      : activePosElement === "serial"
-                        ? layout.serialNumberSize
-                        : activePosElement === "date"
-                          ? layout.dateSize
-                          : layout.customTextSize
-                  }
-                  onChange={(e) => {
-                    const v = Number(e.target.value);
-                    if (activePosElement === "text") patchLayout({ textSize: v });
-                    else if (activePosElement === "serial") patchLayout({ serialNumberSize: v });
-                    else if (activePosElement === "date") patchLayout({ dateSize: v });
-                    else patchLayout({ customTextSize: v });
-                  }}
-                />
-              </div>
-              <div>
-                <Label className="text-xs">اللون</Label>
-                <input
-                  type="color"
-                  className="h-10 w-full rounded-lg border border-border"
-                  value={
-                    activePosElement === "text"
-                      ? layout.textColor
-                      : activePosElement === "serial"
-                        ? layout.serialColor
-                        : activePosElement === "date"
-                          ? layout.dateColor
-                          : layout.customTextColor
-                  }
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    if (activePosElement === "text") patchLayout({ textColor: v });
-                    else if (activePosElement === "serial") patchLayout({ serialColor: v });
-                    else if (activePosElement === "date") patchLayout({ dateColor: v });
-                    else patchLayout({ customTextColor: v });
-                  }}
-                />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
         <Card>
           <CardHeader>
             <CardTitle>معاينة (كل العناصر ظاهرة هنا لتسهيل التموضع)</CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-3">
+            {activeTab !== "page" && (
+              <PositionPad
+                label={positionTargetLabels[positionTarget]}
+                x={position.x}
+                y={position.y}
+                onMove={nudgePosition}
+              />
+            )}
             <LivePreview
               sampleNumber="12345678"
               layout={layout}
