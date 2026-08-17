@@ -1,4 +1,10 @@
 import { PdfLayoutSettings, PrintOptions } from "@/types";
+import {
+  getCardDimensionsMm,
+  MM_TO_CSS_PX,
+  PAGE_WIDTH_MM,
+  pdfPointsToPreviewPx,
+} from "@/utils/cardGeometry";
 import { useCallback, useMemo, useRef, useState } from "react";
 
 interface Props {
@@ -12,11 +18,6 @@ interface Props {
   onLayoutChange?: (partial: Partial<PdfLayoutSettings>) => void;
 }
 
-const PAGE_WIDTH_MM = 210;
-const PAGE_HEIGHT_MM = 297;
-const MARGIN_MM = 5;
-const MM_TO_PX = 96 / 25.4;
-const PDF_POINT_TO_CSS_PX = 96 / 72;
 
 const DESIGN_MODE_OPTIONS: PrintOptions = {
   useSerialNumber: true,
@@ -35,9 +36,7 @@ function cssFontFamily(font: string): string {
 }
 
 function previewFontSize(pdfPoints: number, scale: number): string {
-  // jsPDF receives point values while the browser uses CSS pixels. Converting
-  // points first, then applying the card preview scale, keeps visual size equal.
-  return `${pdfPoints * PDF_POINT_TO_CSS_PX * scale}px`;
+  return `${pdfPointsToPreviewPx(pdfPoints, scale)}px`;
 }
 
 function anchorTransform(align: "left" | "center" | "right", rotation = 0): string | undefined {
@@ -63,16 +62,11 @@ export function LivePreview({
   const [dragging, setDragging] = useState<DragTarget>(null);
 
   const { boxWidthPx, boxHeightPx, baseScale } = useMemo(() => {
-    const availableWidth = PAGE_WIDTH_MM - 2 * MARGIN_MM;
-    const availableHeight = PAGE_HEIGHT_MM - 2 * MARGIN_MM;
-    const boxWidthMm =
-      (availableWidth - layout.boxSpacing * (layout.columns - 1)) / layout.columns;
-    const boxHeightMm =
-      (availableHeight - layout.boxSpacing * (layout.rows - 1)) / layout.rows;
+    const card = getCardDimensionsMm(layout);
     const s = Math.min(1, 600 / PAGE_WIDTH_MM);
     return {
-      boxWidthPx: boxWidthMm * s * MM_TO_PX,
-      boxHeightPx: boxHeightMm * s * MM_TO_PX,
+      boxWidthPx: card.width * s * MM_TO_CSS_PX,
+      boxHeightPx: card.height * s * MM_TO_CSS_PX,
       baseScale: s,
     };
   }, [layout.boxSpacing, layout.columns, layout.rows]);
@@ -130,8 +124,8 @@ export function LivePreview({
   }
 
   const elementClass = editable
-    ? "absolute cursor-move touch-none whitespace-nowrap rounded px-0.5 hover:outline hover:outline-1 hover:outline-primary"
-    : "absolute whitespace-nowrap rounded px-0.5";
+    ? "absolute cursor-move touch-none whitespace-nowrap rounded leading-none hover:outline hover:outline-1 hover:outline-primary"
+    : "absolute whitespace-nowrap rounded leading-none";
 
   return (
     <div>

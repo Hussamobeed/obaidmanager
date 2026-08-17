@@ -1,6 +1,11 @@
 import jsPDF from "jspdf";
 import * as XLSX from "xlsx";
 import { GeneratorSettings, PdfLayoutSettings, PrintOptions } from "@/types";
+import {
+  getCardDimensionsMm,
+  layoutPxToMm,
+  PAGE_MARGIN_MM,
+} from "@/utils/cardGeometry";
 
 /** jsPDF needs to know the real image format — treating a PNG/WEBP upload as
  * "JPEG" can corrupt or blank out the rendered background. */
@@ -90,10 +95,6 @@ export function exportAsExcelBlob(
   });
 }
 
-const PAGE_WIDTH_MM = 210;
-const PAGE_HEIGHT_MM = 297;
-const MARGIN_MM = 5;
-
 function loadImageDimensions(dataUrl: string): Promise<{ width: number; height: number }> {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -116,14 +117,12 @@ export async function generateCardsPdf(
   }
   doc.setLanguage("ar");
 
-  const availableWidth = PAGE_WIDTH_MM - 2 * MARGIN_MM;
-  const availableHeight = PAGE_HEIGHT_MM - 2 * MARGIN_MM;
-  const boxWidth = (availableWidth - layout.boxSpacing * (layout.columns - 1)) / layout.columns;
-  const boxHeight = (availableHeight - layout.boxSpacing * (layout.rows - 1)) / layout.rows;
+  const cardDimensions = getCardDimensionsMm(layout);
+  const boxWidth = cardDimensions.width;
+  const boxHeight = cardDimensions.height;
   const perPage = layout.columns * layout.rows;
 
   const today = new Date().toISOString().split("T")[0];
-  const mmPerPx = 25.4 / 96; // convert the original px-based positions to mm
 
   // Preload the background image once (same image reused on every card) so we
   // know its real aspect ratio for "contain"/"cover" fitting.
@@ -142,8 +141,8 @@ export async function generateCardsPdf(
 
     if (indexOnPage === 0 && pageIndex > 0) doc.addPage();
 
-    const x = MARGIN_MM + col * (boxWidth + layout.boxSpacing);
-    const y = MARGIN_MM + row * (boxHeight + layout.boxSpacing);
+    const x = PAGE_MARGIN_MM + col * (boxWidth + layout.boxSpacing);
+    const y = PAGE_MARGIN_MM + row * (boxHeight + layout.boxSpacing);
 
     if (layout.backgroundImageDataUrl && imgDims) {
       const imgFormat = detectImageFormat(layout.backgroundImageDataUrl);
@@ -180,7 +179,7 @@ export async function generateCardsPdf(
     }
 
     if (layout.useBorder) {
-      doc.setLineWidth(layout.borderWidth * mmPerPx);
+      doc.setLineWidth(layoutPxToMm(layout.borderWidth));
       doc.setDrawColor(layout.borderColor);
       doc.rect(x, y, boxWidth, boxHeight);
     }
@@ -192,7 +191,7 @@ export async function generateCardsPdf(
     doc.setFont(pdfFontName, pdfFontName === "Cairo" ? "normal" : layout.fontWeight === "bold" ? "bold" : "normal");
     doc.setTextColor(layout.textColor || "#000000");
     doc.setFontSize(layout.textSize);
-    doc.text(numbers[i], x + layout.textPositionX * mmPerPx, y + layout.textPositionY * mmPerPx, {
+    doc.text(numbers[i], x + layoutPxToMm(layout.textPositionX), y + layoutPxToMm(layout.textPositionY), {
       align: layout.textAlign === "right" ? "right" : layout.textAlign === "center" ? "center" : "left",
       angle: layout.textRotation || 0,
       baseline: "top",
@@ -204,8 +203,8 @@ export async function generateCardsPdf(
       doc.setFontSize(layout.serialNumberSize);
       doc.text(
         String(serial),
-        x + layout.serialPositionX * mmPerPx,
-        y + layout.serialPositionY * mmPerPx,
+        x + layoutPxToMm(layout.serialPositionX),
+        y + layoutPxToMm(layout.serialPositionY),
         { baseline: "top" }
       );
       serial++;
@@ -215,7 +214,7 @@ export async function generateCardsPdf(
       doc.setFont(pdfFontName, "normal");
       doc.setTextColor(layout.dateColor || "#000000");
       doc.setFontSize(layout.dateSize);
-      doc.text(today, x + layout.datePositionX * mmPerPx, y + layout.datePositionY * mmPerPx, {
+      doc.text(today, x + layoutPxToMm(layout.datePositionX), y + layoutPxToMm(layout.datePositionY), {
         baseline: "top",
       });
     }
@@ -226,8 +225,8 @@ export async function generateCardsPdf(
       doc.setFontSize(layout.customTextSize);
       doc.text(
         printOptions.customText,
-        x + layout.customTextPositionX * mmPerPx,
-        y + layout.customTextPositionY * mmPerPx,
+        x + layoutPxToMm(layout.customTextPositionX),
+        y + layoutPxToMm(layout.customTextPositionY),
         { baseline: "top" }
       );
     }
