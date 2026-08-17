@@ -12,7 +12,7 @@ export function ensureLibraryBucket(): Promise<void> {
     bucketReady = (async () => {
       const { error } = await supabase.storage.createBucket(LIBRARY_BUCKET, {
         public: false,
-        fileSizeLimit: "50MiB",
+        fileSizeLimit: "50MB",
       });
 
       // The storage API returns an "already exists" error when another request
