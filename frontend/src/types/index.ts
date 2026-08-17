@@ -90,14 +90,14 @@ export interface RouterInput {
 
 export interface SyncResult {
   routerId: string;
-  customers: { name: string; numUsers?: string }[];
-  profiles: { name: string; priceUnit?: string; validity?: string }[];
+  customers: { name: string }[];
+  profiles: { name: string }[];
   syncedAt: string;
 }
 
 export interface CachedSyncData {
-  customers: { name: string; numUsers?: string }[];
-  profiles: { name: string; price?: number; validity?: string }[];
+  customers: { name: string }[];
+  profiles: { name: string }[];
   last_synced_at: string | null;
 }
 

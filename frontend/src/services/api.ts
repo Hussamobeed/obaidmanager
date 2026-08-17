@@ -59,7 +59,6 @@ export const syncApi = {
     api.post<{ data: SyncResult }>(`/sync/${routerId}`).then((r) => r.data.data),
   cache: (routerId: string) =>
     api.get<{ data: CachedSyncData | null }>(`/sync/${routerId}/cache`).then((r) => r.data.data),
-  history: (routerId: string) => api.get(`/sync/${routerId}/history`).then((r) => r.data.data),
 };
 
 // ---- Export to MikroTik ----

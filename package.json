@@ -1,10 +1,12 @@
 {
-  "name": "manuscards-maker",
-  "version": "0.1.0",
+  "name": "obaid-manager",
+  "version": "1.0.0",
   "private": true,
   "packageManager": "pnpm@10.15.1",
   "scripts": {
-    "build": "pnpm --filter @manuscards/web build && pnpm --filter @manuscards/android-worker build",
-    "check": "pnpm --filter @manuscards/web check && pnpm --filter @manuscards/android-worker check"
+    "dev": "pnpm --dir frontend dev",
+    "build": "pnpm --dir frontend build",
+    "check": "pnpm --dir frontend exec tsc -b",
+    "lint": "pnpm --dir frontend lint"
   }
 }

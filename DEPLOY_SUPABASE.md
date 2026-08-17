@@ -1,4 +1,4 @@
-# Hersnnet Cards Manager — now "Obaid Manager" — Cloudflare Pages + Supabase deployment
+# Obaid Manager — Cloudflare Pages and Supabase deployment
 
 This replaces the old Node/Express backend with:
 - **Database + file storage**: Supabase (Postgres + Storage)
@@ -6,7 +6,7 @@ This replaces the old Node/Express backend with:
 - **Backend logic**: a single Supabase Edge Function (Deno) at `supabase/functions/api`
 - **Frontend**: `frontend/` folder, deployed as a static site on Cloudflare Pages
 
-The old `backend/` folder (Node/Express) is no longer used — delete it whenever you like.
+The repository contains only the active Cloudflare Pages and Supabase deployment path.
 
 ---
 
@@ -25,17 +25,22 @@ on later if you ever open this up to other people.
 
 ## 3) Apply the database schema
 
-Run these three files, **in order**, in the Supabase Dashboard's SQL Editor (open each file
-in a text editor, copy its full contents — not the filename — and paste into the editor,
-then click Run):
+This repository contains one clean baseline migration:
 
-1. `supabase/migrations/0001_init.sql`
-2. `supabase/migrations/0002_storage.sql`
-3. `supabase/migrations/0003_auth_and_templates.sql`
+```text
+supabase/migrations/20260817130000_profiles_customers_schema.sql
+```
 
-**Note:** migration 0003 drops and recreates the tables that needed a structural change
-(adding per-user ownership), so any router you added while testing before will be
-removed — just re-add it after you log in, it takes a minute.
+Apply it only to an **empty Supabase project** or a deliberately reset development database. It creates the complete application schema, private library bucket, Row Level Security policies, and the `router_sync_snapshots` table used to store only customers and profiles.
+
+For a new linked project, deploy it with the CLI:
+
+```bash
+supabase link --project-ref YOUR-PROJECT-REF
+supabase db push
+```
+
+For an existing project with the old conflicting migrations, create a new Supabase project or back up the data and deliberately reset the old development project before applying this baseline. Do not insert or delete migration-history rows manually.
 
 ## 4) Set the Edge Function secret
 
@@ -53,6 +58,11 @@ supabase secrets set ENCRYPTION_KEY=<paste the 64-character hex string here> --p
 supabase login
 supabase link --project-ref YOUR-PROJECT-REF
 supabase functions deploy api
+
+# Remove discontinued endpoints if they were deployed previously.
+supabase functions delete sync-ingest
+supabase functions delete sync-device
+supabase functions delete reports
 ```
 
 Test the public health check (no login needed):
@@ -83,7 +93,8 @@ cd frontend && npm install && npm run dev
 
 Open the app — you should see a sign-up/sign-in screen. Create your account, add your
 router again, and confirm "Test Connection", "Synchronize", and card generation all work
-end-to-end **before** deploying to Cloudflare.
+end-to-end **before** deploying to Cloudflare. Synchronization imports only User Manager
+customers and profiles; it does not import individual users or sessions.
 
 ## 7) Deploy the frontend to Cloudflare Pages
 

@@ -1,32 +1,36 @@
 # Obaid Manager
 
-(formerly "Hersnnet Cards Manager") — a web app for generating, managing, and exporting
-MikroTik User Manager cards, with direct sync/export to your MikroTik router.
+Obaid Manager is a React and Supabase application for generating, managing, and exporting MikroTik User Manager cards.
 
-## Current deployment path: Cloudflare Pages + Supabase
+## What the application synchronizes
 
-This is the active, supported setup. **Start with `DEPLOY_SUPABASE.md`** for the full
-step-by-step guide (database setup, Edge Function deployment, Cloudflare Pages hookup).
+The application intentionally synchronizes **only** the current list of **User Manager customers** and **profiles** from each configured MikroTik router. It does not request, store, display, or expose individual User Manager users, online sessions, traffic counters, or session-history records.
 
-- `frontend/` — React + TypeScript + Vite app, deployed as a static site on Cloudflare Pages
-- `supabase/` — Postgres schema (`migrations/`) + the backend logic as a Supabase Edge
-  Function (`functions/api/`), which is the only thing that talks to your MikroTik router(s)
-  and to the database/file storage
+The current deployment path uses the following components:
 
-## Legacy: Node/Express + Docker (not currently used)
+| Component | Purpose |
+|---|---|
+| `frontend/` | React, TypeScript, and Vite client application deployed to Cloudflare Pages. |
+| `supabase/migrations/` | A single clean Supabase schema baseline. |
+| `supabase/functions/api/` | The only deployed backend. It authenticates users, communicates with MikroTik routers, and stores profile/customer snapshots. |
 
-The `backend/`, `docker-compose.yml`, `nginx.conf`, and `.env.example` files at the repo
-root are from an earlier self-hosted Node/Express version. They're kept for reference in
-case you ever want to self-host on your own machine/VPS instead of Supabase, but they are
-**not** part of the current Cloudflare + Supabase setup and can be deleted if unused.
+## Development
 
-## Key things to know
+Install the frontend dependencies and run the development server:
 
-- **Auth required**: every user creates their own account (email/password via Supabase
-  Auth). Routers, library files, templates, and settings are all private per account.
-- **MikroTik connectivity**: whichever backend you use (Edge Function or the legacy Node
-  server), it needs actual network reachability to your router's IP. A router on a private
-  LAN isn't reachable from the cloud without a public IP + firewall rule, or a VPN (e.g.
-  Tailscale) bridging the cloud service to your network.
-- **Print templates**: the Templates page lets you build a print layout once and link it to
-  a MikroTik profile name — it auto-applies when you pick that profile in the Generator.
+```bash
+pnpm install
+pnpm dev
+```
+
+Create `frontend/.env` from `frontend/.env.example` and set the Supabase URL, Edge Function URL, and anonymous key before starting the client.
+
+## Database model
+
+Each router has one current record in `router_sync_snapshots`. The record contains JSON arrays of customers and profiles and is replaced whenever the user runs a manual synchronization. This keeps the database small and avoids retaining sensitive user and session data.
+
+## Deployment
+
+Read [DEPLOY_SUPABASE.md](DEPLOY_SUPABASE.md) for the clean-project deployment procedure. The migration in this repository is a baseline schema and must be applied to an empty Supabase project or a deliberately reset development database.
+
+> The Edge Function needs network access to the MikroTik router. A router available only on a private LAN must be reached through a public address with appropriate firewall controls or a private network tunnel such as Tailscale.

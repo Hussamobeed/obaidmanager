@@ -66,121 +66,13 @@ export async function synchronizeProfilesAndCustomers(router: RouterRow) {
 
     return {
       customers: customersRows
-        .map((customer) => ({
-          name: customer.login ?? customer.name ?? "",
-          numUsers: customer["num-users"],
-        }))
+        .map((customer) => ({ name: customer.login ?? customer.name ?? "" }))
         .filter((customer) => customer.name.trim().length > 0),
       profiles: profilesRows
-        .map((profile) => ({
-          name: profile.name ?? "",
-          priceUnit: profile["price-unit"] ?? profile.price ?? "",
-          validity: profile.validity ?? "",
-        }))
+        .map((profile) => ({ name: profile.name ?? "" }))
         .filter((profile) => profile.name.trim().length > 0),
       syncedAt: new Date().toISOString(),
     };
-  });
-}
-
-export async function synchronizeRouter(router: RouterRow) {
-  return withConnection(router, async (conn) => {
-    const identityRows = await conn.command(["/system/identity/print"]);
-    const resourceRows = await conn.command(["/system/resource/print"]);
-
-    const safe = async (words: string[]) => {
-      try {
-        return await conn.command(words);
-      } catch {
-        return [] as Record<string, string>[];
-      }
-    };
-
-    const customersRows = await safe(["/tool/user-manager/customer/print"]);
-    const profilesRows = await safe(["/tool/user-manager/profile/print"]);
-    const usersRows = await safe(["/tool/user-manager/user/print"]);
-    const activeRows = await safe(["/tool/user-manager/session/print"]);
-
-    const customers = customersRows.map((c) => ({
-      name: c.login ?? c.name ?? "",
-      numUsers: c["num-users"],
-    }));
-    const profiles = profilesRows.map((p) => ({
-      name: p.name ?? "",
-      priceUnit: p["price-unit"] ?? p.validity,
-      validity: p.validity,
-    }));
-    const disabledCount = usersRows.filter((u) => u.disabled === "true").length;
-    const expiredCount = usersRows.filter((u) => u.comment === "expired").length;
-    const resource = resourceRows[0] ?? {};
-
-    return {
-      identity: identityRows[0]?.name ?? "unknown",
-      routerosVersion: resource.version ?? "unknown",
-      uptime: resource.uptime ?? "unknown",
-      cpuLoad: resource["cpu-load"] ?? "0",
-      freeMemory: resource["free-memory"] ?? "0",
-      totalMemory: resource["total-memory"] ?? "0",
-      customers,
-      profiles,
-      usersCount: usersRows.length,
-      activeSessionsCount: activeRows.length,
-      expiredUsersCount: expiredCount,
-      disabledUsersCount: disabledCount,
-      syncedAt: new Date().toISOString(),
-    };
-  });
-}
-
-/**
- * Fetches User Manager session data for reporting, on-demand only (never
- * cached/auto-run). Field names in RouterOS User Manager vary somewhat by
- * version/config, so rather than assume specific column names, this returns
- * every raw field the router provides per session, merged with that user's
- * profile name and price where we can match them up. The frontend renders
- * whatever columns actually come back instead of hardcoding a fixed shape.
- */
-export async function fetchUserManagerReport(router: RouterRow) {
-  return withConnection(router, async (conn) => {
-    const safe = async (words: string[]) => {
-      try {
-        return await conn.command(words);
-      } catch {
-        return [] as Record<string, string>[];
-      }
-    };
-
-    const [sessionRows, userRows, profileRows] = await Promise.all([
-      safe(["/tool/user-manager/session/print"]),
-      safe(["/tool/user-manager/user/print"]),
-      safe(["/tool/user-manager/profile/print"]),
-    ]);
-
-    // Map username -> profile name (from the user record), and profile name
-    // -> price (from the profile record), so we can attach a "profile" and
-    // "price" column to each session row even if the session itself doesn't
-    // carry them directly (this differs by RouterOS version).
-    const userToProfile = new Map<string, string>();
-    for (const u of userRows) {
-      if (u.name && u.profile) userToProfile.set(u.name, u.profile);
-    }
-    const profileToPrice = new Map<string, string>();
-    for (const p of profileRows) {
-      if (p.name) profileToPrice.set(p.name, p["price-unit"] ?? p.price ?? "");
-    }
-
-    const rows = sessionRows.map((s) => {
-      const username = s.user ?? s.username ?? "";
-      const profile = s.profile ?? userToProfile.get(username) ?? "";
-      const price = profileToPrice.get(profile) ?? "";
-      return {
-        ...s,
-        profile,
-        price,
-      };
-    });
-
-    return { rows, fetchedAt: new Date().toISOString() };
   });
 }
 

@@ -2,10 +2,3 @@ project_id = "avlhxmwlpamtdmiasofw"
 
 [functions.api]
 verify_jwt = false
-
-[functions.sync-ingest]
-verify_jwt = false
-[functions.reports]
-verify_jwt = false
-[functions.sync-device]
-verify_jwt = false
