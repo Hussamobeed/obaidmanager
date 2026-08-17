@@ -1,6 +1,7 @@
 import { Hono } from "jsr:@hono/hono@4";
 import { z } from "npm:zod@3.23.8";
 import { LIBRARY_BUCKET, supabase } from "./db.ts";
+import { ensureLibraryBucket } from "./storage.ts";
 import { encrypt } from "./cryptoService.ts";
 import {
   exportScriptToRouter,
@@ -241,7 +242,14 @@ const exportSchema = z.object({
   fileName: z.string().min(1).max(255),
   scriptContent: z.string().min(1).optional(),
   libraryFileId: z.string().uuid().optional(),
+  progressId: z.string().uuid().optional(),
 });
+
+type ExportProgress = {
+  current: number;
+  total: number;
+  phase: "preparing" | "running" | "completed";
+};
 
 app.post("/export-to-mikrotik", async (c) => {
   const userId = c.get("userId");
@@ -251,6 +259,42 @@ app.post("/export-to-mikrotik", async (c) => {
 
   const router = await getRouterRow(input.routerId, userId);
   if (!router) return fail(c, 404, "الراوتر غير موجود", "ROUTER_NOT_FOUND");
+
+  try {
+    await ensureLibraryBucket();
+  } catch (err) {
+    return fail(c, 500, err instanceof Error ? err.message : "تعذّر تجهيز حاوية المكتبة", "STORAGE_UNAVAILABLE");
+  }
+
+  let progressRecordId: string | null = null;
+  if (input.progressId) {
+    const { data, error } = await supabase
+      .from("export_history")
+      .insert({
+        user_id: userId,
+        router_id: router.id,
+        library_file_id: input.libraryFileId ?? null,
+        status: "running",
+        message: JSON.stringify({ progress_id: input.progressId, current: 0, total: 0, phase: "preparing" }),
+      })
+      .select("id")
+      .single();
+    if (error || !data) return fail(c, 500, error?.message ?? "تعذّر بدء متابعة التصدير");
+    progressRecordId = data.id;
+  }
+
+  const updateProgress = async (progress: ExportProgress) => {
+    if (!progressRecordId || !input.progressId) return;
+    const { error } = await supabase
+      .from("export_history")
+      .update({
+        status: progress.phase === "completed" ? "success" : "running",
+        message: JSON.stringify({ progress_id: input.progressId, ...progress }),
+      })
+      .eq("id", progressRecordId)
+      .eq("user_id", userId);
+    if (error) console.error("Unable to update export progress", error);
+  };
 
   let scriptContent = input.scriptContent;
   if (!scriptContent && input.libraryFileId) {
@@ -268,26 +312,72 @@ app.post("/export-to-mikrotik", async (c) => {
   if (!scriptContent) return fail(c, 400, "لا يوجد محتوى سكريبت للتصدير", "MISSING_SCRIPT");
 
   try {
-    const result = await exportScriptToRouter(router, input.fileName, scriptContent);
-    await supabase.from("export_history").insert({
-      user_id: userId,
-      router_id: router.id,
-      library_file_id: input.libraryFileId ?? null,
-      status: "success",
-      message: result.log.join(" | "),
-    });
+    const result = await exportScriptToRouter(router, input.fileName, scriptContent, updateProgress);
+    if (progressRecordId) {
+      await supabase
+        .from("export_history")
+        .update({ status: "success", message: result.log.join(" | ") })
+        .eq("id", progressRecordId)
+        .eq("user_id", userId);
+    } else {
+      await supabase.from("export_history").insert({
+        user_id: userId,
+        router_id: router.id,
+        library_file_id: input.libraryFileId ?? null,
+        status: "success",
+        message: result.log.join(" | "),
+      });
+    }
     return c.json({ data: result });
   } catch (err) {
-    const message = (err as Error).message;
-    await supabase.from("export_history").insert({
-      user_id: userId,
-      router_id: router.id,
-      library_file_id: input.libraryFileId ?? null,
-      status: "error",
-      message,
-    });
+    const message = err instanceof Error ? err.message : "فشل تصدير السكريبت";
+    if (progressRecordId) {
+      await supabase
+        .from("export_history")
+        .update({ status: "error", message })
+        .eq("id", progressRecordId)
+        .eq("user_id", userId);
+    } else {
+      await supabase.from("export_history").insert({
+        user_id: userId,
+        router_id: router.id,
+        library_file_id: input.libraryFileId ?? null,
+        status: "error",
+        message,
+      });
+    }
     return fail(c, 502, message, "EXPORT_FAILED");
   }
+});
+
+app.get("/export-to-mikrotik/progress/:progressId", async (c) => {
+  const { data: rows, error } = await supabase
+    .from("export_history")
+    .select("status,message")
+    .eq("user_id", c.get("userId"))
+    .order("created_at", { ascending: false })
+    .limit(25);
+  if (error) return fail(c, 500, error.message);
+
+  const progressId = c.req.param("progressId");
+  for (const row of rows ?? []) {
+    try {
+      const progress = JSON.parse(row.message ?? "{}") as Record<string, unknown>;
+      if (progress.progress_id !== progressId) continue;
+      return c.json({
+        data: {
+          status: row.status,
+          current: Number(progress.current ?? 0),
+          total: Number(progress.total ?? 0),
+          phase: progress.phase ?? "preparing",
+        },
+      });
+    } catch {
+      // Completed and legacy history rows contain a plain-text message.
+    }
+  }
+
+  return c.json({ data: null });
 });
 
 app.get("/export-to-mikrotik/history", async (c) => {
@@ -313,6 +403,11 @@ app.get("/library", async (c) => {
 
 app.post("/library", async (c) => {
   const userId = c.get("userId");
+  try {
+    await ensureLibraryBucket();
+  } catch (err) {
+    return fail(c, 500, err instanceof Error ? err.message : "تعذّر تجهيز حاوية المكتبة", "STORAGE_UNAVAILABLE");
+  }
   const form = await c.req.formData();
   const file = form.get("file");
   if (!(file instanceof File)) return fail(c, 400, "لم يتم إرفاق أي ملف", "MISSING_FILE");

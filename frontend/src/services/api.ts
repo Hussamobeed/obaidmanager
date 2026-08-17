@@ -62,21 +62,59 @@ export const syncApi = {
 };
 
 // ---- Export to MikroTik ----
+export type ExportProgress = {
+  status: "running" | "success" | "error";
+  current: number;
+  total: number;
+  phase: "preparing" | "running" | "completed";
+};
+
 export const exportApi = {
-  run: (input: {
-    routerId: string;
-    fileName: string;
-    scriptContent?: string;
-    libraryFileId?: string;
-  }) =>
-    // A generated user batch can legitimately take longer than the API's
-    // normal 30-second timeout. Keep the request open while the router runs
-    // the temporary script and the backend removes it afterward.
-    api
-      .post<{ data: { success: boolean; log: string[] } }>("/export-to-mikrotik", input, {
-        timeout: 180_000,
-      })
-      .then((r) => r.data.data),
+  async run(
+    input: {
+      routerId: string;
+      fileName: string;
+      scriptContent?: string;
+      libraryFileId?: string;
+    },
+    onProgress?: (progress: ExportProgress) => void
+  ) {
+    const progressId = crypto.randomUUID();
+    let completed = false;
+    let pollInFlight = false;
+
+    const poll = async () => {
+      if (completed || pollInFlight) return;
+      pollInFlight = true;
+      try {
+        const response = await api.get<{ data: ExportProgress | null }>(
+          `/export-to-mikrotik/progress/${progressId}`
+        );
+        if (response.data.data) onProgress?.(response.data.data);
+      } catch {
+        // The progress record may not exist until the export request has
+        // passed authentication and initialized its server-side work.
+      } finally {
+        pollInFlight = false;
+      }
+    };
+
+    const interval = window.setInterval(poll, 500);
+    try {
+      await poll();
+      const response = await api.post<{ data: { success: boolean; log: string[] } }>(
+        "/export-to-mikrotik",
+        { ...input, progressId },
+        { timeout: 600_000 }
+      );
+      completed = true;
+      await poll();
+      return response.data.data;
+    } finally {
+      completed = true;
+      window.clearInterval(interval);
+    }
+  },
 };
 
 // ---- Library ----

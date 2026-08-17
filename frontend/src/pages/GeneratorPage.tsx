@@ -204,11 +204,20 @@ export function GeneratorPage() {
     const toastId = toast.loading("جارٍ رفع السكريبت وتنفيذه على الراوتر...");
     try {
       const name = `${fileNameFor()}.rsc`;
-      const result = await exportApi.run({
-        routerId: selectedRouterId,
-        fileName: name,
-        scriptContent: script,
-      });
+      const result = await exportApi.run(
+        {
+          routerId: selectedRouterId,
+          fileName: name,
+          scriptContent: script,
+        },
+        (progress) => {
+          const message =
+            progress.total > 0
+              ? `جارٍ تنفيذ الجزء ${progress.current}/${progress.total} على MikroTik...`
+              : "جارٍ تجهيز السكريبت للتنفيذ على MikroTik...";
+          toast.loading(message, { id: toastId });
+        }
+      );
       toast.success("تم التصدير والتنفيذ على MikroTik بنجاح", { id: toastId });
       setExportLog(result.log);
     } catch (err) {

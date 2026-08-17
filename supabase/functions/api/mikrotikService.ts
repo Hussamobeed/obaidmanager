@@ -108,10 +108,17 @@ function splitSourceForRouterOS6(scriptContent: string): string[] {
   return chunks;
 }
 
+export type MultipartProgress = {
+  current: number;
+  total: number;
+  phase: "preparing" | "running" | "completed";
+};
+
 export async function exportScriptToRouter(
   router: RouterRow,
   fileName: string,
-  scriptContent: string
+  scriptContent: string,
+  onProgress?: (progress: MultipartProgress) => Promise<void> | void
 ) {
   return withConnection(router, async (conn) => {
     const log: string[] = [`[Edge Function version: ${API_VERSION}]`];
@@ -150,6 +157,7 @@ export async function exportScriptToRouter(
     }
 
     log.push(`تم تنفيذ ${sources.length} جزءًا وحذف السكربتات المؤقتة.`);
+    await onProgress?.({ current: sources.length, total: sources.length, phase: "completed" });
     return { success: true, log };
   });
 }

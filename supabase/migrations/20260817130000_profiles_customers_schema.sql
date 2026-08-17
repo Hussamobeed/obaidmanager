@@ -130,32 +130,32 @@ create policy export_history_owner_access on public.export_history
   for all using (user_id = auth.uid()) with check (user_id = auth.uid());
 
 insert into storage.buckets (id, name, public)
-values ('manuscards-library', 'manuscards-library', false)
+values ('library', 'library', false)
 on conflict (id) do nothing;
 
 create policy library_storage_select_own_files on storage.objects
   for select using (
-    bucket_id = 'manuscards-library'
+    bucket_id = 'library'
     and (storage.foldername(name))[1] = auth.uid()::text
   );
 
 create policy library_storage_insert_own_files on storage.objects
   for insert with check (
-    bucket_id = 'manuscards-library'
+    bucket_id = 'library'
     and (storage.foldername(name))[1] = auth.uid()::text
   );
 
 create policy library_storage_update_own_files on storage.objects
   for update using (
-    bucket_id = 'manuscards-library'
+    bucket_id = 'library'
     and (storage.foldername(name))[1] = auth.uid()::text
   ) with check (
-    bucket_id = 'manuscards-library'
+    bucket_id = 'library'
     and (storage.foldername(name))[1] = auth.uid()::text
   );
 
 create policy library_storage_delete_own_files on storage.objects
   for delete using (
-    bucket_id = 'manuscards-library'
+    bucket_id = 'library'
     and (storage.foldername(name))[1] = auth.uid()::text
   );

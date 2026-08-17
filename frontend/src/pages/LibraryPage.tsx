@@ -79,7 +79,16 @@ export function LibraryPage() {
     setExportingId(id);
     const toastId = toast.loading("جارٍ رفع الملف وتنفيذه على الراوتر...");
     try {
-      await exportApi.run({ routerId: selectedRouterId, fileName, libraryFileId: id });
+      await exportApi.run(
+        { routerId: selectedRouterId, fileName, libraryFileId: id },
+        (progress) => {
+          const message =
+            progress.total > 0
+              ? `جارٍ تنفيذ الجزء ${progress.current}/${progress.total} على MikroTik...`
+              : "جارٍ تجهيز السكريبت للتنفيذ على MikroTik...";
+          toast.loading(message, { id: toastId });
+        }
+      );
       toast.success("تم التصدير والتنفيذ على MikroTik بنجاح", { id: toastId });
     } catch (err) {
       toast.error((err as Error).message, { id: toastId });
