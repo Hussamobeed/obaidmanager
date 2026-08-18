@@ -1,5 +1,5 @@
 {
-  "name": "obaid-manager",
+  "name": "saba-manager-cloud",
   "version": "1.0.0",
   "private": true,
   "packageManager": "pnpm@10.15.1",
@@ -8,5 +8,6 @@
     "build": "pnpm --dir frontend build",
     "check": "pnpm --dir frontend exec tsc -b",
     "lint": "pnpm --dir frontend lint"
-  }
+  },
+  "workspaces": ["frontend"]
 }

@@ -43,7 +43,7 @@ export function AuthPage() {
     <div className="flex min-h-screen items-center justify-center bg-secondary/30 p-4">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle className="text-center text-xl">Obaid Manager</CardTitle>
+          <CardTitle className="text-center text-xl">SABA Manager</CardTitle>
           <p className="text-center text-sm text-muted-foreground">
             سجّل دخولك أو أنشئ حسابًا جديدًا للمتابعة
           </p>

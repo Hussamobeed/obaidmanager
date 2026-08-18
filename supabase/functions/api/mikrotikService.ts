@@ -80,9 +80,16 @@ export async function synchronizeProfilesAndCustomers(router: RouterRow) {
 // large card batch. Keep each script source deliberately below this ceiling.
 // A generated card script is line-oriented, and every user command remains
 // complete because a chunk boundary is only inserted between lines.
-const ROUTEROS6_MAX_SOURCE_BYTES = 2_400;
+const ROUTEROS_DEFAULT_MAX_SOURCE_BYTES = 2_400;
+const ROUTEROS_RB1100_MAX_SOURCE_BYTES = 27_000;
 
-function splitSourceForRouterOS6(scriptContent: string): string[] {
+function sourceLimitForBoard(boardName: string): number {
+  return /^rb1100/i.test(boardName.trim())
+    ? ROUTEROS_RB1100_MAX_SOURCE_BYTES
+    : ROUTEROS_DEFAULT_MAX_SOURCE_BYTES;
+}
+
+function splitSource(scriptContent: string, maxSourceBytes: number): string[] {
   const encoder = new TextEncoder();
   const runDateLine = ":local scriptRunDate [/system clock get date];\n";
   const lines = scriptContent.replace(/\r\n/g, "\n").split("\n");
@@ -94,10 +101,10 @@ function splitSourceForRouterOS6(scriptContent: string): string[] {
     // chunk needs its own local variable because it runs as a separate script.
     if (/^\s*:local\s+scriptRunDate\s+\[\/system clock get date\];?\s*$/.test(line)) continue;
     const statement = `${line}\n`;
-    if (encoder.encode(runDateLine + statement).length > ROUTEROS6_MAX_SOURCE_BYTES) {
+    if (encoder.encode(runDateLine + statement).length > maxSourceBytes) {
       throw new Error("أحد أسطر السكربت أكبر من الحد الآمن لراوتر RouterOS 6");
     }
-    if (encoder.encode(current + statement).length > ROUTEROS6_MAX_SOURCE_BYTES && current !== runDateLine) {
+    if (encoder.encode(current + statement).length > maxSourceBytes && current !== runDateLine) {
       chunks.push(current);
       current = runDateLine;
     }
@@ -121,13 +128,16 @@ export async function exportScriptToRouter(
   onProgress?: (progress: MultipartProgress) => Promise<void> | void
 ) {
   return withConnection(router, async (conn) => {
-    const log: string[] = [`[Edge Function version: ${API_VERSION}]`];
+    const log: string[] = [`[SABA Edge Function version: ${API_VERSION}]`];
     const sanitized = fileName.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 32);
-    const sources = splitSourceForRouterOS6(scriptContent);
-    log.push(`تقسيم السكربت إلى ${sources.length} جزءًا صغيرًا متوافقًا مع RouterOS 6...`);
+    const resource = await conn.command(["/system/resource/print", "=.proplist=board-name"]);
+    const boardName = resource[0]?.["board-name"] ?? "";
+    const maxSourceBytes = sourceLimitForBoard(boardName);
+    const sources = splitSource(scriptContent, maxSourceBytes);
+    log.push(`تقسيم السكربت إلى ${sources.length} جزءًا؛ حد المصدر ${maxSourceBytes.toLocaleString("en-US")} بايت لجهاز ${boardName || "MikroTik"}.`);
 
     for (let index = 0; index < sources.length; index++) {
-      const scriptName = `obaidmgr_${sanitized}_${Date.now()}_${index + 1}`;
+      const scriptName = `saba_um_${sanitized}_${Date.now()}_${index + 1}`;
       const source = sources[index];
       log.push(`إنشاء وتنفيذ الجزء ${index + 1}/${sources.length}...`);
       // No policy argument is sent. RouterOS applies the configured account's

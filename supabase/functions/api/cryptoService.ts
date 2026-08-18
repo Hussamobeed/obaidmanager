@@ -17,12 +17,19 @@ function bytesToHex(bytes: Uint8Array): string {
     .join("");
 }
 
+/** Makes an owned ArrayBuffer so strict Web Crypto typings accept the bytes. */
+function asArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy.buffer;
+}
+
 async function getKey(): Promise<CryptoKey> {
   const hex = Deno.env.get("ENCRYPTION_KEY");
   if (!hex || hex.length !== 64) {
     throw new Error("ENCRYPTION_KEY secret must be a 64-character hex string (32 bytes)");
   }
-  return crypto.subtle.importKey("raw", hexToBytes(hex), "AES-GCM", false, [
+  return crypto.subtle.importKey("raw", asArrayBuffer(hexToBytes(hex)), "AES-GCM", false, [
     "encrypt",
     "decrypt",
   ]);
@@ -33,7 +40,11 @@ export async function encrypt(plainText: string): Promise<string> {
   const key = await getKey();
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const encoded = new TextEncoder().encode(plainText);
-  const cipherBuffer = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, encoded);
+  const cipherBuffer = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv: asArrayBuffer(iv) },
+    key,
+    asArrayBuffer(encoded)
+  );
   return `${bytesToHex(iv)}:${bytesToHex(new Uint8Array(cipherBuffer))}`;
 }
 
@@ -44,6 +55,10 @@ export async function decrypt(payload: string): Promise<string> {
   const key = await getKey();
   const iv = hexToBytes(ivHex);
   const data = hexToBytes(dataHex);
-  const plainBuffer = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, data);
+  const plainBuffer = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: asArrayBuffer(iv) },
+    key,
+    asArrayBuffer(data)
+  );
   return new TextDecoder().decode(plainBuffer);
 }

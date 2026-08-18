@@ -31,6 +31,6 @@ export const useAppStore = create<AppState>()(
       setLastCustomer: (customer) => set({ lastCustomer: customer }),
       setLastProfile: (profile) => set({ lastProfile: profile }),
     }),
-    { name: "obaid-manager-app-settings" }
+    { name: "saba-manager-app-settings" }
   )
 );

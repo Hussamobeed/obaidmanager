@@ -7,6 +7,7 @@ import { DashboardPage } from "@/pages/DashboardPage";
 import { GeneratorPage } from "@/pages/GeneratorPage";
 import { LibraryPage } from "@/pages/LibraryPage";
 import { RoutersPage } from "@/pages/RoutersPage";
+import { ReportsPage } from "@/pages/ReportsPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { TemplatesPage } from "@/pages/TemplatesPage";
 import type { Session } from "@supabase/supabase-js";
@@ -20,11 +21,12 @@ const titles: Record<string, string> = {
   "/library": "المكتبة",
   "/templates": "قوالب الطباعة",
   "/settings": "الإعدادات",
+  "/reports": "تقرير المستخدمين",
 };
 
 export default function App() {
   const location = useLocation();
-  const title = titles[location.pathname] ?? "Obaid Manager";
+  const title = titles[location.pathname] ?? "SABA Manager";
 
   const [session, setSession] = useState<Session | null>(null);
   const [checkedSession, setCheckedSession] = useState(false);
@@ -56,6 +58,7 @@ export default function App() {
             <Route path="/library" element={<LibraryPage />} />
             <Route path="/templates" element={<TemplatesPage />} />
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/reports" element={<ReportsPage />} />
           </Routes>
         </main>
       </div>

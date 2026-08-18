@@ -172,3 +172,47 @@ export const settingsApi = {
     remove: (id: string) => api.delete(`/settings/presets/all/${id}`),
   },
 };
+
+
+// ---- SABA User Manager cloud jobs ----
+export type SabaReportJob = {
+  id: string;
+  router_id: string;
+  date_from: string;
+  date_to: string;
+  status: "queued" | "running" | "completed" | "failed";
+  cursor: { next_date?: string };
+  processed_rows: number;
+  error_message?: string | null;
+  completed_at?: string | null;
+};
+
+export type SabaReportRow = {
+  row_number: number;
+  row_data: {
+    firstLoginDate: string;
+    username: string;
+    price: string;
+    profile: string;
+    nasPortId: string;
+  };
+};
+
+export const sabaApi = {
+  catalog: {
+    get: (routerId: string) => api.get(`/saba/catalog/${routerId}`).then((r) => r.data.data),
+    sync: (routerId: string) => api.post(`/saba/catalog/${routerId}/sync`).then((r) => r.data.data),
+  },
+  reports: {
+    createUserManager: (routerId: string, from: string, to: string) =>
+      api.post<{ data: SabaReportJob }>("/saba/reports/userman", { routerId, from, to }).then((r) => r.data.data),
+    continue: (jobId: string) =>
+      api.post<{ data: SabaReportJob }>(`/saba/reports/${jobId}/continue`).then((r) => r.data.data),
+    get: (jobId: string) => api.get<{ data: SabaReportJob }>(`/saba/reports/${jobId}`).then((r) => r.data.data),
+    rows: (jobId: string, page = 1, pageSize = 50) =>
+      api.get<{ data: SabaReportRow[]; page: number; pageSize: number; total: number }>(
+        `/saba/reports/${jobId}/rows`,
+        { params: { page, pageSize } }
+      ).then((r) => r.data),
+  },
+};

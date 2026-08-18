@@ -131,7 +131,7 @@ export const useGeneratorStore = create<GeneratorState>()(
       },
     }),
     {
-      name: "obaid-manager-generator-settings",
+      name: "saba-manager-generator-settings",
       partialize: (s) => ({
         settings: s.settings,
         printOptions: s.printOptions,

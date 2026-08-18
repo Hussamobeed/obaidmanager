@@ -14,10 +14,10 @@ import toast from "react-hot-toast";
 const emptyForm: RouterInput = {
   name: "",
   host: "",
-  port: 8728,
+  port: 8729,
   username: "admin",
   password: "",
-  sslEnabled: false,
+  sslEnabled: true,
   description: "",
   isDefault: false,
 };

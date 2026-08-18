@@ -47,7 +47,7 @@ export function generateCards(settings: GeneratorSettings): GenerationResult {
 
     script +=
       `/log info "إنشاء مستخدم جديد: ${candidate}";\n` +
-      `/tool user-manager user add customer=${customer} username=${candidate} password=${password} first-name=$scriptRunDate comment=${comment};\n` +
+      `/tool user-manager user add customer=${customer} username=${candidate} password=${password} first-name=("SABA-CREATED:" . $scriptRunDate) comment=${comment};\n` +
       `/tool user-manager user create-and-activate-profile customer=${customer} profile=${profile} "${candidate}";\n`;
   }
 

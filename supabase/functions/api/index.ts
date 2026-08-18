@@ -10,6 +10,11 @@ import {
   type RouterRow,
 } from "./mikrotikService.ts";
 import { API_VERSION } from "./version.ts";
+import {
+  detectRouterMode,
+  fetchUserManagerReportDay,
+  syncUserManagerCatalog,
+} from "./sabaUserManagerService.ts";
 
 type Vars = { userId: string };
 const app = new Hono<{ Variables: Vars }>().basePath("/api");
@@ -35,7 +40,7 @@ function fail(c: any, status: number, message: string, code = "ERROR") {
 app.get("/health", (c) =>
   c.json({
     status: "ok",
-    service: "obaid-manager-api",
+    service: "saba-manager-api",
     version: API_VERSION,
     timestamp: new Date().toISOString(),
   })
@@ -60,10 +65,10 @@ app.use("/*", async (c, next) => {
 const routerSchema = z.object({
   name: z.string().min(1).max(100),
   host: z.string().min(1).max(255),
-  port: z.number().int().min(1).max(65535).default(8728),
+  port: z.number().int().min(1).max(65535).default(8729),
   username: z.string().min(1).max(100),
   password: z.string().min(1).max(255),
-  sslEnabled: z.boolean().default(false),
+  sslEnabled: z.boolean().default(true),
   description: z.string().max(500).optional(),
   isDefault: z.boolean().default(false),
 });
@@ -648,6 +653,159 @@ app.put("/templates/:id", async (c) => {
 app.delete("/templates/:id", async (c) => {
   await supabase.from("templates").delete().eq("id", c.req.param("id")).eq("user_id", c.get("userId"));
   return c.body(null, 204);
+});
+
+// ------------------------------------------------ SABA cloud catalogue --
+app.post("/saba/catalog/:routerId/sync", async (c) => {
+  const userId = c.get("userId");
+  const routerId = c.req.param("routerId");
+  const router = await getRouterRow(routerId, userId);
+  if (!router) return fail(c, 404, "الراوتر غير موجود", "ROUTER_NOT_FOUND");
+  try {
+    const mode = await detectRouterMode(router);
+    const catalog = await syncUserManagerCatalog(router, mode);
+    const { error } = await supabase.from("um_catalogs").upsert({
+      router_id: routerId,
+      owner_id: userId,
+      router_version: mode.version,
+      profiles: catalog.profiles,
+      customers: catalog.customers,
+      synced_at: catalog.syncedAt,
+    });
+    if (error) throw error;
+    await supabase.from("routers").update({
+      routeros_version: mode.version,
+      board_name: mode.boardName,
+      last_connected_at: new Date().toISOString(),
+    }).eq("id", routerId).eq("owner_id", userId);
+    return c.json({ data: { ...catalog, router: mode } });
+  } catch (err) {
+    return fail(c, 502, err instanceof Error ? err.message : "تعذرت مزامنة كتالوج User Manager", "CATALOG_SYNC_FAILED");
+  }
+});
+
+app.get("/saba/catalog/:routerId", async (c) => {
+  const { data, error } = await supabase
+    .from("um_catalogs")
+    .select("router_version,profiles,customers,synced_at")
+    .eq("router_id", c.req.param("routerId"))
+    .eq("owner_id", c.get("userId"))
+    .maybeSingle();
+  if (error) return fail(c, 500, error.message);
+  return c.json({ data: data ?? null });
+});
+
+// -------------------------------------------- resumable report jobs -------
+const reportJobSchema = z.object({
+  routerId: z.string().uuid(),
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+});
+
+function nextIsoDate(iso: string): string {
+  const date = new Date(`${iso}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date.toISOString().slice(0, 10);
+}
+
+app.post("/saba/reports/userman", async (c) => {
+  const userId = c.get("userId");
+  const parsed = reportJobSchema.safeParse(await c.req.json());
+  if (!parsed.success) return fail(c, 400, "يجب تحديد تاريخ بداية ونهاية صالحين", "VALIDATION_ERROR");
+  const input = parsed.data;
+  if (input.from > input.to) return fail(c, 400, "تاريخ البداية يجب أن يسبق تاريخ النهاية", "VALIDATION_ERROR");
+  const router = await getRouterRow(input.routerId, userId);
+  if (!router) return fail(c, 404, "الراوتر غير موجود", "ROUTER_NOT_FOUND");
+  const { data, error } = await supabase.from("report_jobs").insert({
+    owner_id: userId,
+    router_id: input.routerId,
+    report_type: "userman-report",
+    date_from: input.from,
+    date_to: input.to,
+    status: "queued",
+    cursor: { next_date: input.from },
+  }).select().single();
+  if (error || !data) return fail(c, 500, error?.message ?? "تعذّر بدء التقرير");
+  return c.json({ data }, 201);
+});
+
+app.post("/saba/reports/:id/continue", async (c) => {
+  const userId = c.get("userId");
+  const { data: job, error: jobError } = await supabase
+    .from("report_jobs")
+    .select("*")
+    .eq("id", c.req.param("id"))
+    .eq("owner_id", userId)
+    .eq("report_type", "userman-report")
+    .single();
+  if (jobError || !job) return fail(c, 404, "مهمة التقرير غير موجودة", "REPORT_JOB_NOT_FOUND");
+  if (job.status === "completed") return c.json({ data: job });
+  const router = await getRouterRow(job.router_id, userId);
+  if (!router) return fail(c, 404, "الراوتر غير موجود", "ROUTER_NOT_FOUND");
+  const currentDate = String(job.cursor?.next_date ?? job.date_from);
+  if (!currentDate || currentDate > String(job.date_to)) {
+    const { data: completed } = await supabase.from("report_jobs").update({
+      status: "completed", completed_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    }).eq("id", job.id).eq("owner_id", userId).select().single();
+    return c.json({ data: completed });
+  }
+  try {
+    const mode = await detectRouterMode(router);
+    const rows = await fetchUserManagerReportDay(router, mode, currentDate);
+    const startNumber = Number(job.processed_rows ?? 0);
+    if (rows.length) {
+      const payload = rows.map((row, index) => ({
+        job_id: job.id,
+        owner_id: userId,
+        row_number: startNumber + index + 1,
+        identity_key: row.username,
+        row_data: row,
+      }));
+      const { error } = await supabase.from("report_rows").upsert(payload, {
+        onConflict: "job_id,identity_key",
+        ignoreDuplicates: true,
+      });
+      if (error) throw error;
+    }
+    const nextDate = nextIsoDate(currentDate);
+    const isComplete = nextDate > String(job.date_to);
+    const { data: updated, error: updateError } = await supabase.from("report_jobs").update({
+      status: isComplete ? "completed" : "running",
+      cursor: { next_date: nextDate },
+      processed_rows: startNumber + rows.length,
+      updated_at: new Date().toISOString(),
+      completed_at: isComplete ? new Date().toISOString() : null,
+      error_message: null,
+    }).eq("id", job.id).eq("owner_id", userId).select().single();
+    if (updateError) throw updateError;
+    return c.json({ data: updated });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "فشل جلب جزء التقرير";
+    await supabase.from("report_jobs").update({
+      status: "failed", error_message: message, updated_at: new Date().toISOString(),
+    }).eq("id", job.id).eq("owner_id", userId);
+    return fail(c, 502, message, "REPORT_SLICE_FAILED");
+  }
+});
+
+app.get("/saba/reports/:id", async (c) => {
+  const { data, error } = await supabase.from("report_jobs").select("*")
+    .eq("id", c.req.param("id")).eq("owner_id", c.get("userId")).single();
+  if (error || !data) return fail(c, 404, "مهمة التقرير غير موجودة", "REPORT_JOB_NOT_FOUND");
+  return c.json({ data });
+});
+
+app.get("/saba/reports/:id/rows", async (c) => {
+  const userId = c.get("userId");
+  const page = Math.max(1, Number(c.req.query("page") ?? 1));
+  const pageSize = Math.min(100, Math.max(10, Number(c.req.query("pageSize") ?? 50)));
+  const from = (page - 1) * pageSize;
+  const { data, error, count } = await supabase.from("report_rows")
+    .select("row_number,row_data", { count: "exact" })
+    .eq("job_id", c.req.param("id")).eq("owner_id", userId)
+    .order("row_number", { ascending: true }).range(from, from + pageSize - 1);
+  if (error) return fail(c, 500, error.message);
+  return c.json({ data: data ?? [], page, pageSize, total: count ?? 0 });
 });
 
 Deno.serve(app.fetch);

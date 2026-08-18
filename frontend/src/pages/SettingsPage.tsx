@@ -39,7 +39,7 @@ export function SettingsPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "obaid-manager-settings.json";
+    a.download = "saba-manager-settings.json";
     a.click();
     URL.revokeObjectURL(url);
   }

@@ -7,10 +7,10 @@ export function Sidebar() {
     <aside className="hidden w-64 shrink-0 flex-col border-l border-border bg-card md:flex">
       <div className="flex h-16 items-center gap-2 border-b border-border px-5">
         <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold">
-          H
+          S
         </div>
         <div>
-          <div className="text-sm font-semibold leading-tight">Obaid</div>
+          <div className="text-sm font-semibold leading-tight">SABA</div>
           <div className="text-xs text-muted-foreground leading-tight">Manager</div>
         </div>
       </div>

@@ -1,4 +1,4 @@
-import { CreditCard, Gauge, Library, Router, Settings, SwatchBook } from "lucide-react";
+import { CreditCard, FileBarChart, Gauge, Library, Router, Settings, SwatchBook } from "lucide-react";
 
 export const navItems = [
   { to: "/", label: "الرئيسية", icon: Gauge },
@@ -6,5 +6,6 @@ export const navItems = [
   { to: "/routers", label: "الأجهزة", icon: Router },
   { to: "/library", label: "المكتبة", icon: Library },
   { to: "/templates", label: "القوالب", icon: SwatchBook },
+  { to: "/reports", label: "التقرير", icon: FileBarChart },
   { to: "/settings", label: "الإعدادات", icon: Settings },
 ];
